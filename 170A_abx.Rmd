@@ -183,10 +183,26 @@ positive_delays_48_cleaned <- positive_delays_48_cleaned %>%
 
 
 ```{r}
-summary(positive_delays_48)
+encounter_order_count <- combined_data %>%
+  group_by(MRN_DI, FIN_DI) %>%
+  tally(name = "num_abx_orders") %>%
+  arrange(desc(num_abx_orders))
+
+# View the top 10 encounters with the most antibiotic orders
+head(encounter_order_count, 10)
+
 ```
 
 ```{r}
+library(DBI)
+library(RSQLite)
 
+con <- dbConnect(RSQLite::SQLite(), "delay.db")
+
+dbWriteTable(con, "vitals", vitals, overwrite = TRUE)
+dbWriteTable(con, "labs", labs, overwrite = TRUE)
+dbWriteTable(con, "delay_48", positive_delays_48_cleaned, overwrite = TRUE)
+
+dbDisconnect(con)
 ```
 
