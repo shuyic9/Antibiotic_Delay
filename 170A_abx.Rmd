@@ -1,0 +1,192 @@
+---
+title: "170A_Project"
+author: "Shuyi Chen"
+date: "2025-03-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '/Users/tc/Downloads/CHOC_Infusion')
+```
+
+```{r}
+library(tidybayes)
+library(lubridate)
+library(tidyverse)
+```
+
+
+```{r}
+abx_ord <- read.csv('uci_mds_ip_abx_ords.csv')
+patients <- read.csv('uci_mds_ip_enc.csv')
+pressor <- read.csv('uci_mds_ip_pressors_admins.csv')
+vitals <- read_csv('uci_mds_ip_vitals.csv')
+labs <- read_csv('uci_mds_ip_lab_results.csv')
+```
+
+```{r}
+#View(abx_ord)
+#View(patient)
+summary(abx_ord)
+```
+
+```{r}
+summary(patients)
+```
+
+```{r}
+patients <- patients %>%
+  mutate(REG_DT = as.POSIXct(REG_DT, format = "%m/%d/%y %H:%M"),
+         DISCH_DT = as.POSIXct(DISCH_DT, format = "%m/%d/%y %H:%M"))
+
+abx_ord <- abx_ord %>%
+  mutate(ORD_DT = as.POSIXct(ORD_DT, format = "%m/%d/%y %H:%M"))
+
+
+combined_data <- inner_join(abx_ord, patients, by = c("MRN_DI", "FIN_DI"))
+
+```
+
+
+```{r}
+##Calculate Delays
+combined_data <- combined_data %>%
+  mutate(delay_minutes = as.numeric(difftime(ORD_DT, REG_DT, units = "mins")),
+         delay_hours = delay_minutes / 60)
+
+summary(combined_data$delay_hours)
+```
+```{r}
+negative_delays_count <- combined_data %>%
+  filter(delay_minutes < 0) %>%
+  nrow()
+negative_delays_count
+```
+
+
+```{r}
+negative_delays <- combined_data %>% 
+  filter(delay_minutes < 0)
+
+earliest_visits <- patients %>%
+  group_by(MRN_DI) %>%
+  summarize(earliest_REG_DT = min(REG_DT, na.rm = TRUE))
+
+negative_delays_prior <- negative_delays %>%
+  left_join(earliest_visits, by = "MRN_DI") %>%
+  filter(earliest_REG_DT < REG_DT)
+
+total_unique_patients <- negative_delays %>% distinct(MRN_DI) %>% nrow()
+unique_patients_with_prior <- negative_delays_prior %>% distinct(MRN_DI) %>% nrow()
+proportion_prior <- unique_patients_with_prior / total_unique_patients
+
+#proportion of patients from negative delays have prior visits
+print(proportion_prior)
+```
+
+```{r}
+unique_patients_overall <- combined_data %>% 
+  distinct(MRN_DI) %>% 
+  nrow()
+print(unique_patients_overall)
+```
+```{r}
+positive_delays <- combined_data %>% 
+  filter(delay_minutes > 0)
+
+# Plot the distribution of positive delay hours
+ggplot(positive_delays, aes(x = delay_hours)) +
+  geom_histogram(bins = 100, fill = "skyblue", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of Positive Delay Hours",
+       x = "Delay Hours",
+       y = "Number of Patients") +
+  theme_minimal()
+
+
+negative_delays <- combined_data %>% 
+  filter(delay_minutes < 0)
+
+# Plot the distribution of positive delay hours
+ggplot(negative_delays, aes(x = delay_hours)) +
+  geom_histogram(bins = 100, fill = "orange", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of Positive Delay Hours",
+       x = "Delay Hours",
+       y = "Number of Patients") +
+  theme_minimal()
+
+```
+
+
+```{r}
+#observing only 0-48 hrs of delays
+positive_delays_48 <- combined_data %>%
+  filter(delay_minutes > 0, delay_hours <= 48)
+
+nrow(positive_delays_48)
+```
+
+
+```{r}
+summary(pressor)
+```
+
+```{r}
+#unique patients in 0-48hrs delay group
+ positive_delays_48 %>% 
+  distinct(MRN_DI) %>% 
+  nrow()
+```
+```{r}
+#patients in both delays and labs
+positive_delays_48 %>%
+  semi_join(labs, by = "MRN_DI") %>%  
+  distinct(MRN_DI) %>%
+  nrow()
+#patients in both delays and vitals
+positive_delays_48 %>%
+  semi_join(vitals, by = "MRN_DI") %>%  
+  distinct(MRN_DI) %>%
+  nrow()
+#patients in both delays and pressor
+positive_delays_48 %>%
+  semi_join(pressor, by = "MRN_DI") %>%  
+  distinct(MRN_DI) %>%
+  nrow()
+```
+
+Since most patients appear to have lab results, and lab results contains multiple continuous variables that we don't have enough prior patient to compute, we will be dropping patients with no lab results. Also, because there are very few patients in pressor data, we are converting pressor data to binary variable. 
+
+```{r}
+#filter patients with no lab results
+positive_delays_48_cleaned <- positive_delays_48 %>%
+  semi_join(labs, by = c("MRN_DI", "FIN_DI"))
+
+nrow(positive_delays_48_cleaned)
+nrow(positive_delays_48)
+```
+
+We dropped about 6000 observations when filtering out patients with no lab results. 
+
+```{r}
+#encounters that have pressor data
+pressor_encounters <- pressor %>%
+  distinct(MRN_DI, FIN_DI) %>%
+  mutate(pressor_use = 1)
+nrow(pressor_encounters)
+```
+```{r}
+#create binary variable indicating whether the patient encounter is on pressor or not
+positive_delays_48_cleaned <- positive_delays_48_cleaned %>%
+  left_join(pressor_encounters, by = c("MRN_DI", "FIN_DI")) %>%
+  mutate(pressor_use = if_else(is.na(pressor_use), 0, 1))
+```
+
+
+```{r}
+summary(positive_delays_48)
+```
+
+```{r}
+
+```
+
